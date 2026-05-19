@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,5 +112,34 @@ int sdk_detect(SdkInfo *info) {
 
     printf("  -> All tools ready.\n\n");
     info->ready = 1;
+    return 0;
+}
+
+int sdk_detect_kotlin(char *kotlinc_path, int pathlen) {
+    /* check KOTLIN_HOME first */
+    const char *kh = getenv("KOTLIN_HOME");
+    if (kh) {
+        char tmp[512];
+        snprintf(tmp, sizeof(tmp), "%s/bin/kotlinc", kh);
+        if (access(tmp, X_OK) == 0) {
+            snprintf(kotlinc_path, pathlen, "%s", tmp);
+            return 1;
+        }
+    }
+
+    /* check PATH via which */
+    FILE *fp = popen("which kotlinc 2>/dev/null", "r");
+    if (!fp) return 0;
+
+    char path[512] = {0};
+    if (fgets(path, sizeof(path), fp))
+        path[strcspn(path, "\n")] = 0;
+    pclose(fp);
+
+    if (strlen(path) > 0 && access(path, X_OK) == 0) {
+        snprintf(kotlinc_path, pathlen, "%s", path);
+        return 1;
+    }
+
     return 0;
 }

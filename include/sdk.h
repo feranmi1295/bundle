@@ -13,3 +13,5 @@ typedef struct {
 int sdk_detect(SdkInfo *info);
 
 #endif
+
+int sdk_detect_kotlin(char *kotlinc_path, int pathlen);

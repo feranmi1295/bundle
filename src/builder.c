@@ -7,6 +7,7 @@
 #include "resolver.h"
 #include "sdk.h"
 #include "pipeline.h"
+#include <unistd.h>
 #include "error.h"
 
 static void make_dir(const char *path) {
@@ -177,7 +178,8 @@ void bundle_template(char **argv) {
     printf("\n[Bundle] Framework ready. Run 'bundle make' next.\n");
 }
 
-void bundle_make(void) {
+void bundle_make(char **argv) {
+    (void)argv; /* used in --framework flag */
     BundleConfig config;
     if (parse_nextgen(BUNDLE_CONFIG, &config) != 0) return;
     print_config(&config);
@@ -195,4 +197,33 @@ void bundle_build(void) {
     if (sdk_detect(&sdk) != 0) return;
 
     pipeline_build(&sdk, &config);
+}
+
+void bundle_install(void) {
+    printf("[Bundle] Installing Bundle to /usr/local/bin...\n");
+
+    char self[512];
+    ssize_t len = readlink("/proc/self/exe", self, sizeof(self) - 1);
+    if (len < 0) {
+        bundle_error("Could not find Bundle binary path.");
+        return;
+    }
+    self[len] = 0;
+
+    /* already installed at target path */
+    if (strstr(self, "/usr/local/bin/bundle") != NULL) {
+        printf("[Bundle] Already installed at /usr/local/bin/bundle\n");
+        printf("[Bundle] To reinstall: sudo cp ./bundle /usr/local/bin/bundle\n");
+        return;
+    }
+
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "sudo cp \"%s\" /usr/local/bin/bundle", self);
+    if (system(cmd) != 0) {
+        bundle_error("Install failed. Try: sudo cp %s /usr/local/bin/bundle", self);
+        return;
+    }
+
+    printf("[Bundle] Installed successfully.\n");
+    printf("[Bundle] Run 'bundle' from anywhere now.\n");
 }

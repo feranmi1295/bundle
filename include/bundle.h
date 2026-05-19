@@ -9,6 +9,7 @@ typedef enum {
     CMD_TEMPLATE,
     CMD_MAKE,
     CMD_BUILD,
+    CMD_INSTALL,
     CMD_UNKNOWN
 } BundleCommand;
 

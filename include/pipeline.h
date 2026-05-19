@@ -5,5 +5,6 @@
 #include "sdk.h"
 
 int pipeline_build(SdkInfo *sdk, BundleConfig *config);
+int pipeline_compile_kotlin(const char *android_jar);
 
 #endif

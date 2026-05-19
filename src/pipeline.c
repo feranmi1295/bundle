@@ -108,7 +108,10 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config) {
     if (run(cmd) != 0) return -1;
     printf("[Bundle] Resources linked.\n\n");
 
-    /* step 3 - javac */
+    /* step 3a - kotlinc (if .kt sources exist) */
+    if (pipeline_compile_kotlin(android_jar) < 0) return -1;
+
+    /* step 3b - javac */
     printf("[Bundle] Step 3/5 - Compiling Java sources...\n");
     snprintf(cmd, sizeof(cmd),
         "javac -cp \"%s\" -d .bundle/build/obj "
@@ -160,5 +163,52 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config) {
 
     printf("\n[Bundle] Build complete!\n");
     printf("[Bundle] APK -> output.apk\n\n");
+    return 0;
+}
+
+int pipeline_compile_kotlin(const char *android_jar) {
+    char kotlinc[512] = {0};
+
+    printf("[Bundle] Checking for Kotlin sources...\n");
+
+    /* check if any .kt files exist */
+    FILE *fp = popen("find app/src -name *.kt 2>/dev/null | head -1", "r");
+    if (!fp) return 0;
+    char found[256] = {0};
+    if (fgets(found, sizeof(found), fp))
+        found[strcspn(found, "\n")] = 0;
+    pclose(fp);
+
+    if (strlen(found) == 0) {
+        printf("[Bundle] No Kotlin sources found, skipping.\n\n");
+        return 0;
+    }
+
+    /* detect kotlinc */
+    if (!sdk_detect_kotlin(kotlinc, sizeof(kotlinc))) {
+        fprintf(stderr,
+            "\n[Bundle Error] Kotlin sources found but kotlinc not installed.\n"
+            "  -> Install from: https://kotlinlang.org/docs/command-line.html\n"
+            "  -> Or via sdk: sdk install kotlin\n\n");
+        return -1;
+    }
+
+    printf("[Bundle] kotlinc found: %s\n", kotlinc);
+
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
+        "\"%s\" -cp \"%s\" "
+        "-d .bundle/build/obj "
+        "$(find app/src -name \"*.kt\" 2>/dev/null) 2>&1",
+        kotlinc, android_jar);
+
+    printf("[Bundle] $ %s\n", cmd);
+    int ret = system(cmd);
+    if (ret != 0) {
+        fprintf(stderr, "\n[Bundle Error] Kotlin compilation failed.\n\n");
+        return -1;
+    }
+
+    printf("[Bundle] Kotlin compiled.\n\n");
     return 0;
 }

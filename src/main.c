@@ -4,12 +4,13 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Bundle v%s - The Android build system that actually works\n", BUNDLE_VERSION);
+        printf("Bundle v%s - The Android build system that actually works\n\n", BUNDLE_VERSION);
         printf("Usage:\n");
         printf("  bundle init              - Initialize project\n");
-        printf("  bundle template          - Scaffold a framework\n");
-        printf("  bundle make              - Resolve and download dependencies\n");
+        printf("  bundle template --blank  - Scaffold a framework\n");
+        printf("  bundle make              - Resolve and check dependencies\n");
         printf("  bundle build             - Build APK\n");
+        printf("  bundle install           - Install Bundle to /usr/local/bin\n");
         return 0;
     }
 
