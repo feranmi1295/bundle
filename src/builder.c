@@ -179,9 +179,36 @@ void bundle_template(char **argv) {
 }
 
 void bundle_make(char **argv) {
-    (void)argv; /* used in --framework flag */
+    /* check for --framework react-native@0.73 override */
+    char fw_override[64]  = {0};
+    char ver_override[32] = {0};
+
+    for (int i = 2; argv[i] != NULL; i++) {
+        if (strcmp(argv[i], "--framework") == 0 && argv[i+1] != NULL) {
+            char tmp[64];
+            snprintf(tmp, sizeof(tmp), "%s", argv[i+1]);
+            char *at = strchr(tmp, '@');
+            if (at) {
+                *at = 0;
+                snprintf(fw_override,  sizeof(fw_override),  "%s", tmp);
+                snprintf(ver_override, sizeof(ver_override), "%s", at + 1);
+            } else {
+                bundle_error("--framework format must be name@version e.g. react-native@0.73");
+                return;
+            }
+            break;
+        }
+    }
     BundleConfig config;
     if (parse_nextgen(BUNDLE_CONFIG, &config) != 0) return;
+
+    /* apply --framework overrides if provided */
+    if (strlen(fw_override) > 0) {
+        snprintf(config.name,    sizeof(config.name),    "%s", fw_override);
+        snprintf(config.version, sizeof(config.version), "%s", ver_override);
+        printf("[Bundle] Framework override: %s v%s\n", config.name, config.version);
+    }
+
     print_config(&config);
     if (check_compatibility(&config) != 0) return;
     printf("[Bundle] All checks passed. Ready to download dependencies.\n");
