@@ -1,0 +1,6 @@
+bundle
+output.apk
+.bundle/
+app/AndroidManifest.xml
+app/res/values/strings.xml
+*.o
