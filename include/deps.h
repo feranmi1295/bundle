@@ -1,12 +1,12 @@
 #ifndef DEPS_H
 #define DEPS_H
 
-/* single dependency entry */
 typedef struct {
-    char group[128];     /* com.squareup.retrofit2 */
-    char artifact[128];  /* retrofit               */
-    char version[32];    /* 2.9.0                  */
-    char local[512];     /* .bundle/deps/retrofit-2.9.0.aar */
+    char group[128];
+    char artifact[128];
+    char version[32];
+    char local[512];
+    char classpath[512];  /* jar to pass to javac/kotlinc */
 } Dep;
 
 #define MAX_DEPS 64
@@ -16,13 +16,8 @@ typedef struct {
     int  count;
 } DepList;
 
-/* parse [dependencies] from bundle.nextgen */
 int  deps_parse(const char *path, DepList *list);
-
-/* download all deps to .bundle/deps/ */
 int  deps_download(DepList *list);
-
-/* return space-separated classpath string */
 void deps_classpath(DepList *list, char *out, int outlen);
 
 #endif

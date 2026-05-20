@@ -228,7 +228,12 @@ void bundle_build(void) {
     SdkInfo sdk;
     if (sdk_detect(&sdk) != 0) return;
 
-    pipeline_build(&sdk, &config);
+    /* gap 1: load and download deps before build */
+    DepList deps;
+    if (deps_parse(BUNDLE_CONFIG, &deps) != 0) return;
+    if (deps_download(&deps) != 0) return;
+
+    pipeline_build(&sdk, &config, &deps);
 }
 
 void bundle_install(void) {

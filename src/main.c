@@ -4,7 +4,8 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Bundle v%s - The Android build system that actually works\n\n", BUNDLE_VERSION);
+        printf("Bundle v%s - The Android build system that actually works\n", BUNDLE_VERSION);
+        printf("Platform: Linux (x86_64)\n\n");
         printf("Usage:\n");
         printf("  bundle init              - Initialize project\n");
         printf("  bundle template --blank  - Scaffold a framework\n");

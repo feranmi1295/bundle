@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "pipeline.h"
+#include "deps.h"
 #include "error.h"
 
 static int run(const char *cmd) {
@@ -22,7 +23,7 @@ static void make_dir(const char *path) {
     if (system(cmd) != 0) {}
 }
 
-int pipeline_build(SdkInfo *sdk, BundleConfig *config) {
+int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps) {
     printf("[Bundle] Starting APK pipeline...\n\n");
 
     make_dir(".bundle/build/res");
@@ -84,7 +85,7 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config) {
         }
     }
 
-    char cmd[2048];
+    char cmd[6144];
 
     /* step 1 - aapt2 compile */
     printf("[Bundle] Step 1/5 - Compiling resources...\n");
@@ -113,10 +114,18 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config) {
 
     /* step 3b - javac */
     printf("[Bundle] Step 3/5 - Compiling Java sources...\n");
+    char dep_cp[4096] = {0};
+    deps_classpath(deps, dep_cp, sizeof(dep_cp));
+    char full_cp[5120];
+    if (strlen(dep_cp) > 0)
+        snprintf(full_cp, sizeof(full_cp), "%s:%s", android_jar, dep_cp);
+    else
+        snprintf(full_cp, sizeof(full_cp), "%s", android_jar);
+
     snprintf(cmd, sizeof(cmd),
         "javac -cp \"%s\" -d .bundle/build/obj "
         "$(find app/src .bundle/build/gen -name \"*.java\" 2>/dev/null) 2>&1",
-        android_jar);
+        full_cp);
     if (run(cmd) != 0) return -1;
     printf("[Bundle] Java compiled.\n\n");
 
@@ -195,7 +204,7 @@ int pipeline_compile_kotlin(const char *android_jar) {
 
     printf("[Bundle] kotlinc found: %s\n", kotlinc);
 
-    char cmd[2048];
+    char cmd[6144];
     snprintf(cmd, sizeof(cmd),
         "\"%s\" -cp \"%s\" "
         "-d .bundle/build/obj "
