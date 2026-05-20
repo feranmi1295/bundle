@@ -2,12 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "bundle.h"
 #include "builder.h"
 #include "resolver.h"
 #include "sdk.h"
 #include "pipeline.h"
-#include <unistd.h>
 #include "deps.h"
 #include "error.h"
 
@@ -52,15 +52,19 @@ void bundle_init(void) {
         "kotlin = \"1.9.x\"\n"
         "\n"
         "[dependencies]\n"
-        "# add your dependencies here\n"
+        "# format: group:artifact = \"version\"\n"
+        "# example: com.squareup.retrofit2:retrofit = \"2.9.0\"\n"
     );
     write_file("README.md",
         "# My Bundle App\n\n"
-        "Built with Bundle - The Android build system that actually works.\n\n"
+        "Built with Bundle v" BUNDLE_VERSION " - The Android build system that actually works.\n\n"
         "## Commands\n\n"
         "- `bundle template --blank` - Choose your framework\n"
-        "- `bundle make`             - Resolve dependencies\n"
-        "- `bundle build`            - Build APK\n"
+        "- `bundle add group:artifact version` - Add a dependency\n"
+        "- `bundle make` - Resolve dependencies\n"
+        "- `bundle build` - Build debug APK\n"
+        "- `bundle build --release` - Build release APK\n"
+        "- `bundle clean` - Clean build artifacts\n"
     );
     printf("\n[Bundle] Project ready. Edit bundle.nextgen to get started.\n");
 }
@@ -155,7 +159,7 @@ void bundle_template(char **argv) {
     int blank = 0;
     if (argv[2] && strcmp(argv[2], "--blank") == 0) blank = 1;
     if (!blank) {
-        bundle_error("No framework specified. Use: bundle template --blank");
+        bundle_error("Use: bundle template --blank");
         return;
     }
     printf("\n[Bundle] Select a framework:\n\n");
@@ -180,7 +184,6 @@ void bundle_template(char **argv) {
 }
 
 void bundle_make(char **argv) {
-    /* check for --framework react-native@0.73 override */
     char fw_override[64]  = {0};
     char ver_override[32] = {0};
 
@@ -194,16 +197,16 @@ void bundle_make(char **argv) {
                 snprintf(fw_override,  sizeof(fw_override),  "%s", tmp);
                 snprintf(ver_override, sizeof(ver_override), "%s", at + 1);
             } else {
-                bundle_error("--framework format must be name@version e.g. react-native@0.73");
+                bundle_error("--framework format: name@version e.g. react-native@0.73");
                 return;
             }
             break;
         }
     }
+
     BundleConfig config;
     if (parse_nextgen(BUNDLE_CONFIG, &config) != 0) return;
 
-    /* apply --framework overrides if provided */
     if (strlen(fw_override) > 0) {
         snprintf(config.name,    sizeof(config.name),    "%s", fw_override);
         snprintf(config.version, sizeof(config.version), "%s", ver_override);
@@ -219,7 +222,85 @@ void bundle_make(char **argv) {
     if (deps_download(&deps) != 0) return;
 }
 
-void bundle_build(void) {
+/* ── GAP 3: bundle clean ─────────────────────────────────────────────── */
+void bundle_clean(void) {
+    printf("[Bundle] Cleaning build artifacts...\n");
+    if (system("rm -rf .bundle/build output.apk") != 0) {}
+    printf("[Bundle] Cleaned: .bundle/build\n");
+    printf("[Bundle] Cleaned: output.apk\n");
+    printf("[Bundle] Done. Run 'bundle build' to rebuild.\n");
+}
+
+/* ── GAP 4: bundle add ───────────────────────────────────────────────── */
+void bundle_add(char **argv) {
+    if (!argv[2] || !argv[3]) {
+        bundle_error("Usage: bundle add group:artifact version\n"
+                     "  e.g: bundle add com.squareup.retrofit2:retrofit 2.9.0");
+        return;
+    }
+
+    const char *coord   = argv[2];
+    const char *version = argv[3];
+
+    /* validate format */
+    if (!strchr(coord, ':')) {
+        bundle_error("Invalid format: %s\n"
+                     "  Must be group:artifact e.g. com.squareup.retrofit2:retrofit", coord);
+        return;
+    }
+
+    /* read bundle.nextgen */
+    FILE *f = fopen(BUNDLE_CONFIG, "r");
+    if (!f) {
+        bundle_error("bundle.nextgen not found. Run 'bundle init' first.");
+        return;
+    }
+
+    char content[8192] = {0};
+    char line[256];
+    while (fgets(line, sizeof(line), f))
+        strncat(content, line, sizeof(content) - strlen(content) - 1);
+    fclose(f);
+
+    /* check not already present */
+    if (strstr(content, coord)) {
+        printf("[Bundle] Dependency already exists: %s\n", coord);
+        return;
+    }
+
+    /* find [dependencies] section and append */
+    char new_entry[256];
+    snprintf(new_entry, sizeof(new_entry), "%s = \"%s\"\n", coord, version);
+
+    char *dep_section = strstr(content, "[dependencies]");
+    if (!dep_section) {
+        bundle_error("[dependencies] section not found in bundle.nextgen");
+        return;
+    }
+
+    /* find end of file and append after [dependencies] */
+    char *end = dep_section + strlen(dep_section);
+    /* find last newline */
+    while (end > dep_section && *(end-1) == '\n') end--;
+    *end = 0;
+
+    /* write back */
+    f = fopen(BUNDLE_CONFIG, "w");
+    if (!f) { bundle_error("Cannot write bundle.nextgen"); return; }
+    fprintf(f, "%s\n%s", content, new_entry);
+    fclose(f);
+
+    printf("[Bundle] Added: %s = \"%s\"\n", coord, version);
+    printf("[Bundle] Run 'bundle make' to download.\n");
+}
+
+void bundle_build(char **argv) {
+    /* gap 5: detect --release flag */
+    int release = 0;
+    for (int i = 2; argv[i] != NULL; i++) {
+        if (strcmp(argv[i], "--release") == 0) { release = 1; break; }
+    }
+
     BundleConfig config;
     if (parse_nextgen(BUNDLE_CONFIG, &config) != 0) return;
     print_config(&config);
@@ -228,17 +309,15 @@ void bundle_build(void) {
     SdkInfo sdk;
     if (sdk_detect(&sdk) != 0) return;
 
-    /* gap 1: load and download deps before build */
     DepList deps;
     if (deps_parse(BUNDLE_CONFIG, &deps) != 0) return;
     if (deps_download(&deps) != 0) return;
 
-    pipeline_build(&sdk, &config, &deps);
+    pipeline_build(&sdk, &config, &deps, release);
 }
 
 void bundle_install(void) {
     printf("[Bundle] Installing Bundle to /usr/local/bin...\n");
-
     char self[512];
     ssize_t len = readlink("/proc/self/exe", self, sizeof(self) - 1);
     if (len < 0) {
@@ -247,7 +326,6 @@ void bundle_install(void) {
     }
     self[len] = 0;
 
-    /* already installed at target path */
     if (strstr(self, "/usr/local/bin/bundle") != NULL) {
         printf("[Bundle] Already installed at /usr/local/bin/bundle\n");
         printf("[Bundle] To reinstall: sudo cp ./bundle /usr/local/bin/bundle\n");
@@ -260,7 +338,6 @@ void bundle_install(void) {
         bundle_error("Install failed. Try: sudo cp %s /usr/local/bin/bundle", self);
         return;
     }
-
     printf("[Bundle] Installed successfully.\n");
     printf("[Bundle] Run 'bundle' from anywhere now.\n");
 }

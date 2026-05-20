@@ -1,7 +1,7 @@
 #ifndef BUNDLE_H
 #define BUNDLE_H
 
-#define BUNDLE_VERSION "0.1.0"
+#define BUNDLE_VERSION "0.2.0"
 #define BUNDLE_CONFIG  "bundle.nextgen"
 
 typedef enum {
@@ -10,6 +10,8 @@ typedef enum {
     CMD_MAKE,
     CMD_BUILD,
     CMD_INSTALL,
+    CMD_CLEAN,
+    CMD_ADD,
     CMD_UNKNOWN
 } BundleCommand;
 
