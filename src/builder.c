@@ -8,6 +8,7 @@
 #include "sdk.h"
 #include "pipeline.h"
 #include <unistd.h>
+#include "deps.h"
 #include "error.h"
 
 static void make_dir(const char *path) {
@@ -211,7 +212,11 @@ void bundle_make(char **argv) {
 
     print_config(&config);
     if (check_compatibility(&config) != 0) return;
-    printf("[Bundle] All checks passed. Ready to download dependencies.\n");
+    printf("[Bundle] All checks passed.\n\n");
+
+    DepList deps;
+    if (deps_parse(BUNDLE_CONFIG, &deps) != 0) return;
+    if (deps_download(&deps) != 0) return;
 }
 
 void bundle_build(void) {
