@@ -6,6 +6,7 @@
 #include "pipeline.h"
 #include "deps.h"
 #include "error.h"
+#include "rn.h"
 
 static int run(const char *cmd) {
     printf("[Bundle] $ %s\n", cmd);
@@ -129,41 +130,62 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps, int releas
     }
     printf("[Bundle] android.jar : %s\n\n", android_jar);
 
-    /* AndroidManifest.xml */
-    if (access("app/AndroidManifest.xml", F_OK) != 0) {
-        printf("[Bundle] Generating AndroidManifest.xml...\n");
-        FILE *f = fopen("app/AndroidManifest.xml", "w");
-        if (!f) { bundle_error("Cannot create AndroidManifest.xml"); return -1; }
-        fprintf(f,
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-            "    package=\"com.bundle.app\">\n"
-            "    <application\n"
-            "        android:label=\"%s\"\n"
-            "        android:theme=\"@android:style/Theme.DeviceDefault\">\n"
-            "        <activity android:name=\".MainActivity\"\n"
-            "            android:exported=\"true\">\n"
-            "            <intent-filter>\n"
-            "                <action android:name=\"android.intent.action.MAIN\" />\n"
-            "                <category android:name=\"android.intent.category.LAUNCHER\" />\n"
-            "            </intent-filter>\n"
-            "        </activity>\n"
-            "    </application>\n"
-            "</manifest>\n", config->name);
-        fclose(f);
-        printf("[Bundle] Created: app/AndroidManifest.xml\n\n");
-    }
+    /* detect project structure - RN vs plain Android */
+    int is_rn_structure = (access("android/app/src/main/AndroidManifest.xml", F_OK) == 0);
 
-    /* strings.xml */
-    if (access("app/res/values/strings.xml", F_OK) != 0) {
-        FILE *f = fopen("app/res/values/strings.xml", "w");
-        if (f) {
+    char manifest_path[256];
+    char res_path[256];
+    char java_src[256];
+
+    if (is_rn_structure) {
+        /* React Native project - use existing android/ structure */
+        snprintf(manifest_path, sizeof(manifest_path),
+            "android/app/src/main/AndroidManifest.xml");
+        snprintf(res_path, sizeof(res_path),
+            "android/app/src/main/res");
+        snprintf(java_src, sizeof(java_src),
+            "android/app/src/main/java");
+        printf("[Bundle/RN] Using existing Android structure.\n\n");
+    } else {
+        /* plain Bundle project - generate manifest */
+        snprintf(manifest_path, sizeof(manifest_path), "app/AndroidManifest.xml");
+        snprintf(res_path, sizeof(res_path), "app/res");
+        snprintf(java_src, sizeof(java_src), "app/src");
+
+        if (access(manifest_path, F_OK) != 0) {
+            printf("[Bundle] Generating AndroidManifest.xml...\n");
+            FILE *f = fopen(manifest_path, "w");
+            if (!f) { bundle_error("Cannot create AndroidManifest.xml"); return -1; }
             fprintf(f,
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                "<resources>\n"
-                "    <string name=\"app_name\">%s</string>\n"
-                "</resources>\n", config->name);
+                "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                "    package=\"com.bundle.app\">\n"
+                "    <application\n"
+                "        android:label=\"%s\"\n"
+                "        android:theme=\"@android:style/Theme.DeviceDefault\">\n"
+                "        <activity android:name=\".MainActivity\"\n"
+                "            android:exported=\"true\">\n"
+                "            <intent-filter>\n"
+                "                <action android:name=\"android.intent.action.MAIN\" />\n"
+                "                <category android:name=\"android.intent.category.LAUNCHER\" />\n"
+                "            </intent-filter>\n"
+                "        </activity>\n"
+                "    </application>\n"
+                "</manifest>\n", config->name);
             fclose(f);
+            printf("[Bundle] Created: %s\n\n", manifest_path);
+        }
+
+        if (access("app/res/values/strings.xml", F_OK) != 0) {
+            FILE *f = fopen("app/res/values/strings.xml", "w");
+            if (f) {
+                fprintf(f,
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                    "<resources>\n"
+                    "    <string name=\"app_name\">%s</string>\n"
+                    "</resources>\n", config->name);
+                fclose(f);
+            }
         }
     }
 
@@ -177,6 +199,15 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps, int releas
             extract_native_libs(deps->deps[i].local, deps->deps[i].artifact);
     }
 
+    /* detect React Native and run Metro bundler */
+    int is_rn = (strcmp(config->name, "react-native") == 0);
+    if (is_rn) {
+        printf("[Bundle/RN] React Native project detected.\n\n");
+        if (rn_check_node()    != 0) return -1;
+        if (rn_install_deps()  != 0) return -1;
+        if (rn_bundle_js(!release) != 0) return -1;
+    }
+
     char cmd[6144];
     char full_cp[5120];
     if (strlen(dep_cp) > 0)
@@ -187,22 +218,76 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps, int releas
     /* step 1 - aapt2 compile */
     printf("[Bundle] Step 1/5 - Compiling resources...\n");
     snprintf(cmd, sizeof(cmd),
-        "\"%s\" compile --dir app/res -o .bundle/build/res/res.zip 2>&1",
-        sdk->aapt2);
+        "\"%s\" compile --dir \"%s\" -o .bundle/build/res/res.zip 2>&1",
+        sdk->aapt2, res_path);
     if (run(cmd) != 0) return -1;
     printf("[Bundle] Resources compiled.\n\n");
 
     /* step 2 - aapt2 link */
     printf("[Bundle] Step 2/5 - Linking resources...\n");
+    /* read applicationId from build.gradle if RN project */
+    char pkg_id[128] = "com.bundle.app";
+    if (is_rn_structure) {
+        FILE *gf = popen(
+            "grep applicationId android/app/build.gradle"
+            " | awk -F\"\\\"\" '{print $2}'"
+            " | tr -d '\n'",
+            "r");
+        if (gf) {
+            char tmp[128] = {0};
+            if (fgets(tmp, sizeof(tmp), gf) && strlen(tmp) > 3)
+                snprintf(pkg_id, sizeof(pkg_id), "%s", tmp);
+            pclose(gf);
+        }
+        pkg_id[strcspn(pkg_id, "\n\r ")] = 0;
+
+        /* inject package attribute into a temp manifest */
+        printf("[Bundle] Package ID: %s\n", pkg_id);
+        char patch_cmd[1024];
+        snprintf(patch_cmd, sizeof(patch_cmd),
+            "sed 's/<manifest /<manifest package=\"%s\" /' "
+            "android/app/src/main/AndroidManifest.xml "
+            "> .bundle/build/AndroidManifest.xml",
+            pkg_id);
+        if (system(patch_cmd) == 0)
+            snprintf(manifest_path, sizeof(manifest_path),
+                ".bundle/build/AndroidManifest.xml");
+    }
+
+    /* find androidx AARs from gradle cache for -I flags */
+    char aapt2_extra_I[4096] = {0};
+    if (is_rn_structure) {
+        FILE *aar_fp = popen(
+            "find $HOME/.gradle/caches -name appcompat-1.7.1.aar"
+            " -o -name appcompat-resources-1.7.1.aar 2>/dev/null | sort -u",
+            "r");
+        if (aar_fp) {
+            char aar_line[512];
+            while (fgets(aar_line, sizeof(aar_line), aar_fp)) {
+                aar_line[strcspn(aar_line, "\n")] = 0;
+                if (strlen(aar_line) > 0) {
+                    char itmp[600];
+                    snprintf(itmp, sizeof(itmp), "-I \"%s\" ", aar_line);
+                    strncat(aapt2_extra_I, itmp,
+                        sizeof(aapt2_extra_I) - strlen(aapt2_extra_I) - 1);
+                }
+            }
+            pclose(aar_fp);
+        }
+    }
+
     snprintf(cmd, sizeof(cmd),
         "\"%s\" link -o .bundle/build/apk/bundle-unaligned.apk "
-        "--manifest app/AndroidManifest.xml "
+        "--manifest \"%s\" "
         "-I \"%s\" "
+        "%s "
         ".bundle/build/res/res.zip "
         "--java .bundle/build/gen "
         "--min-sdk-version %s "
         "--target-sdk-version %s 2>&1",
-        sdk->aapt2, android_jar, config->min_sdk, config->target_sdk);
+        sdk->aapt2, manifest_path, android_jar,
+        aapt2_extra_I,
+        config->min_sdk, config->target_sdk);
     if (run(cmd) != 0) return -1;
     printf("[Bundle] Resources linked.\n\n");
 
@@ -213,8 +298,8 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps, int releas
     printf("[Bundle] Step 3/5 - Compiling Java sources...\n");
     snprintf(cmd, sizeof(cmd),
         "javac -cp \"%s\" -d .bundle/build/obj "
-        "$(find app/src .bundle/build/gen -name \"*.java\" 2>/dev/null) 2>&1",
-        full_cp);
+        "$(find \"%s\" .bundle/build/gen -name \"*.java\" 2>/dev/null) 2>&1",
+        full_cp, java_src);
     if (run(cmd) != 0) return -1;
     printf("[Bundle] Java compiled.\n\n");
 
@@ -229,8 +314,14 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps, int releas
 
     /* add dex to apk */
     snprintf(cmd, sizeof(cmd),
-        "cd .bundle/build/dex && zip -u ../apk/bundle-unaligned.apk classes.dex 2>&1");
+        "zip -j .bundle/build/apk/bundle-unaligned.apk .bundle/build/dex/classes.dex 2>&1");
     if (run(cmd) != 0) return -1;
+
+    /* embed RN JS bundle into APK before aligning */
+    if (is_rn) {
+        if (rn_embed_bundle(".bundle/build/apk/bundle-unaligned.apk") != 0)
+            return -1;
+    }
 
     /* step 5 - zipalign */
     printf("[Bundle] Step 5/5 - Aligning and signing APK...\n");
