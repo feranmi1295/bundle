@@ -218,12 +218,12 @@ int pipeline_build(SdkInfo *sdk, BundleConfig *config, DepList *deps, int releas
     if (run(cmd) != 0) return -1;
     printf("[Bundle] Java compiled.\n\n");
 
-    /* step 4 - d8 */
+    /* step 4 - d8 with --lib to silence activity warning */
     printf("[Bundle] Step 4/5 - DEX compilation...\n");
     snprintf(cmd, sizeof(cmd),
-        "\"%s\" --output .bundle/build/dex "
+        "\"%s\" --lib \"%s\" --output .bundle/build/dex "
         "$(find .bundle/build/obj -name \"*.class\" 2>/dev/null) 2>&1",
-        sdk->d8);
+        sdk->d8, android_jar);
     if (run(cmd) != 0) return -1;
     printf("[Bundle] DEX compiled.\n\n");
 

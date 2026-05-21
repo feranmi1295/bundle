@@ -171,15 +171,70 @@ void bundle_template(char **argv) {
     int choice = 0;
     if (scanf("%d", &choice) != 1) choice = 0;
     printf("\n");
+    const char *fw_name    = NULL;
+    const char *fw_version = NULL;
+
     switch (choice) {
-        case 1: scaffold_react_native(); break;
-        case 2: scaffold_flutter();      break;
-        case 3: scaffold_kotlin();       break;
-        case 4: scaffold_java();         break;
+        case 1:
+            scaffold_react_native();
+            fw_name = "react-native"; fw_version = "0.73";
+            break;
+        case 2:
+            scaffold_flutter();
+            fw_name = "flutter"; fw_version = "3.19";
+            break;
+        case 3:
+            scaffold_kotlin();
+            fw_name = "kotlin"; fw_version = "1.9";
+            break;
+        case 4:
+            scaffold_java();
+            fw_name = "java"; fw_version = "17";
+            break;
         default:
             bundle_error("Invalid choice. Pick 1-4.");
             return;
     }
+
+    /* fix 2: write chosen framework into bundle.nextgen */
+    if (fw_name) {
+        FILE *f = fopen(BUNDLE_CONFIG, "r");
+        if (f) {
+            char content[8192] = {0};
+            char line[256];
+            while (fgets(line, sizeof(line), f))
+                strncat(content, line, sizeof(content) - strlen(content) - 1);
+            fclose(f);
+
+            /* replace framework name and version */
+            char *name_pos = strstr(content, "name = \"\"");
+            if (name_pos) {
+                char updated[8192] = {0};
+                int  prefix_len = (int)(name_pos - content);
+                char suffix[4096] = {0};
+                snprintf(suffix, sizeof(suffix), "%s",
+                    name_pos + strlen("name = \"\""));
+                /* skip old version line in suffix */
+                char *ver_pos = strstr(suffix, "version = \"latest\"");
+                if (ver_pos) {
+                    char after_ver[4096] = {0};
+                    snprintf(after_ver, sizeof(after_ver), "%s",
+                        ver_pos + strlen("version = \"latest\""));
+                    snprintf(updated, sizeof(updated),
+                        "%.*sname = \"%s\"\nversion = \"%s\"%s",
+                        prefix_len, content, fw_name, fw_version, after_ver);
+                } else {
+                    snprintf(updated, sizeof(updated),
+                        "%.*sname = \"%s\"\n%s",
+                        prefix_len, content, fw_name, suffix);
+                }
+                f = fopen(BUNDLE_CONFIG, "w");
+                if (f) { fprintf(f, "%s", updated); fclose(f); }
+            }
+        }
+        printf("[Bundle] bundle.nextgen updated: framework = %s v%s\n", fw_name, fw_version);
+    }
+
     printf("\n[Bundle] Framework ready. Run 'bundle make' next.\n");
 }
 
@@ -295,7 +350,6 @@ void bundle_add(char **argv) {
 }
 
 void bundle_build(char **argv) {
-    /* gap 5: detect --release flag */
     int release = 0;
     for (int i = 2; argv[i] != NULL; i++) {
         if (strcmp(argv[i], "--release") == 0) { release = 1; break; }
@@ -309,6 +363,7 @@ void bundle_build(char **argv) {
     SdkInfo sdk;
     if (sdk_detect(&sdk) != 0) return;
 
+    /* fix 3: parse + download deps once, pass to pipeline */
     DepList deps;
     if (deps_parse(BUNDLE_CONFIG, &deps) != 0) return;
     if (deps_download(&deps) != 0) return;
